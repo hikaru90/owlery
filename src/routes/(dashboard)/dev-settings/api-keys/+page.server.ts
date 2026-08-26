@@ -7,24 +7,49 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ locals }) => {
 	const teamId = requireTeamId(locals.teamId);
 	if (!locals.domainId) {
-		return { needsDomain: true as const, keys: [], domains: [] };
+		return {
+			needsDomain: true as const,
+			keys: [],
+			domains: [],
+			currentDomainId: null as number | null,
+		};
 	}
+	const domains = await getDomains(teamId);
+	const domainNameById = new Map(domains.map((d) => [d.id, d.name]));
+	const keys = (await listApiKeys(teamId, locals.domainId)).map((key) => ({
+		...key,
+		domainLabel:
+			key.domainId == null
+				? 'All domains'
+				: (domainNameById.get(key.domainId) ?? `domain #${key.domainId}`),
+	}));
 	return {
 		needsDomain: false as const,
-		keys: await listApiKeys(teamId, locals.domainId),
-		domains: await getDomains(teamId),
+		keys,
+		domains,
+		currentDomainId: locals.domainId,
 	};
 };
 
 export const actions: Actions = {
 	create: async ({ request, locals }) => {
 		const teamId = requireTeamId(locals.teamId);
-		const selectedDomainId = requireDomainId(locals.domainId);
+		requireDomainId(locals.domainId);
 		const form = await request.formData();
 		const name = String(form.get('name') ?? '').trim();
 		const permission = String(form.get('permission') ?? 'FULL') as 'FULL' | 'SENDING';
 		const domainRaw = String(form.get('domainId') ?? '').trim();
-		const domainId = domainRaw ? Number(domainRaw) : selectedDomainId;
+
+		// Empty select = all domains (null). Never silently fall back to the
+		// domain switcher — that ignored the dropdown and bound keys wrong.
+		let domainId: number | undefined;
+		if (domainRaw !== '') {
+			domainId = Number(domainRaw);
+			if (!Number.isFinite(domainId)) {
+				return fail(400, { error: 'Invalid domain' });
+			}
+		}
+
 		if (!name) return fail(400, { error: 'Name required' });
 		try {
 			const key = await addApiKey({ name, permission, teamId, domainId });
