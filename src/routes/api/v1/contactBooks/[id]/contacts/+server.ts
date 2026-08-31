@@ -14,6 +14,8 @@ const contactSchema = z.object({
 	lastName: z.string().optional(),
 	properties: z.record(z.string(), z.unknown()).optional(),
 	subscribed: z.boolean().optional(),
+	/** Caller-verified address (own double opt-in): skip DOI email, store subscribed. */
+	emailConfirmed: z.boolean().optional(),
 });
 
 function serializeContact(contact: {

@@ -10,7 +10,7 @@ import {
 	bulkAddContacts,
 } from './contact-service';
 import { db } from '../db';
-import { contacts, queueJobs } from '../db/schema';
+import { contacts, emails, queueJobs } from '../db/schema';
 import { QUEUES } from '../queue/constants';
 
 describe('contact-service', () => {
@@ -48,6 +48,54 @@ describe('contact-service', () => {
 		expect(updated.id).toBe(created.id);
 		expect(updated.firstName).toBe('Augusta');
 		expect(JSON.parse(updated.properties)).toEqual({ plan: 'pro', tier: 'gold' });
+	});
+
+	it('addOrUpdateContact stores emailConfirmed contacts subscribed without DOI email', async () => {
+		const team = createTeam();
+		const book = createContactBook(team.id, { doubleOptInEnabled: true });
+
+		const created = await addOrUpdateContact(
+			book.id,
+			{
+				email: 'Verified@Example.com',
+				emailConfirmed: true,
+			},
+			team.id,
+		);
+
+		expect(created.subscribed).toBe(true);
+		expect(created.unsubscribeReason).toBeNull();
+		expect(db.select().from(emails).all()).toHaveLength(0);
+	});
+
+	it('addOrUpdateContact keeps DOI pending flow without emailConfirmed', async () => {
+		const team = createTeam();
+		const book = createContactBook(team.id, { doubleOptInEnabled: true });
+
+		const created = await addOrUpdateContact(book.id, { email: 'pending@example.com' }, team.id);
+
+		expect(created.subscribed).toBe(false);
+		expect(created.unsubscribeReason).toBeNull();
+	});
+
+	it('addOrUpdateContact does not re-subscribe unsubscribed contacts via emailConfirmed', async () => {
+		const team = createTeam();
+		const book = createContactBook(team.id, { doubleOptInEnabled: true });
+		const contact = createContact(book.id, {
+			email: 'gone@example.com',
+			subscribed: false,
+			unsubscribeReason: 'UNSUBSCRIBED',
+		});
+
+		const updated = await addOrUpdateContact(
+			book.id,
+			{ email: 'gone@example.com', emailConfirmed: true },
+			team.id,
+		);
+
+		expect(updated.id).toBe(contact.id);
+		expect(updated.subscribed).toBe(false);
+		expect(updated.unsubscribeReason).toBe('UNSUBSCRIBED');
 	});
 
 	it('listContacts supports search and cursor pagination', async () => {

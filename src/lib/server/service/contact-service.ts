@@ -21,6 +21,12 @@ export type ContactInput = {
 	lastName?: string | null;
 	properties?: Record<string, unknown>;
 	subscribed?: boolean;
+	/**
+	 * Caller asserts the address is already verified through its own double
+	 * opt-in. Skips the contact book's DOI email and stores the contact as
+	 * subscribed. Never re-subscribes an existing unsubscribed contact.
+	 */
+	emailConfirmed?: boolean;
 };
 
 function buildContactPayload(contact: Contact): ContactPayload {
@@ -134,7 +140,9 @@ export function listContacts(params: ListContactsParams): {
 /**
  * Insert or update a contact. Applies double opt-in rules: new subscribers in
  * double opt-in books start unsubscribed until they confirm, and re-subscribe
- * attempts through bulk import are ignored.
+ * attempts through bulk import are ignored. `emailConfirmed: true` marks a new
+ * contact as pre-verified by the caller (own double opt-in) so it is stored
+ * subscribed without sending the DOI email.
  */
 export async function addOrUpdateContact(
 	contactBookId: string,
@@ -160,14 +168,19 @@ export async function addOrUpdateContact(
 		.get();
 
 	const isExplicitUnsubscribe = contact.subscribed === false;
+	const isPreConfirmed = contact.emailConfirmed === true;
 
 	const shouldSendDoubleOptIn =
 		contactBook.doubleOptInEnabled &&
 		!isExplicitUnsubscribe &&
+		!isPreConfirmed &&
 		(!existing || (!existing.subscribed && existing.unsubscribeReason === null));
 
 	const shouldCreatePending =
-		contactBook.doubleOptInEnabled && existing === undefined && !isExplicitUnsubscribe;
+		contactBook.doubleOptInEnabled &&
+		existing === undefined &&
+		!isExplicitUnsubscribe &&
+		!isPreConfirmed;
 
 	let saved: Contact;
 

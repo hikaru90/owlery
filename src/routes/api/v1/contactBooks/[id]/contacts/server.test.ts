@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { and, eq } from 'drizzle-orm';
 import { resetDb } from '../../../../../../tests/helpers/db';
 import {
 	createTeamWithApiKey,
@@ -7,6 +8,8 @@ import {
 } from '../../../../../../tests/helpers/factories';
 import { buildApiEvent, bearer, invokeHandler } from '../../../../../../tests/helpers/api';
 import { GET, POST } from './+server';
+import { db } from '../../../../../../lib/server/db';
+import { contacts } from '../../../../../../lib/server/db/schema';
 
 describe('GET /api/v1/contactBooks/[id]/contacts', () => {
 	beforeEach(() => resetDb());
@@ -47,5 +50,27 @@ describe('POST /api/v1/contactBooks/[id]/contacts', () => {
 
 		expect(status).toBe(200);
 		expect((json as { contactId: string }).contactId).toBeTruthy();
+	});
+
+	it('stores emailConfirmed contacts subscribed in double opt-in books', async () => {
+		const { team, apiKey } = await createTeamWithApiKey();
+		const book = createContactBook(team.id, { doubleOptInEnabled: true });
+
+		const event = buildApiEvent({
+			method: 'POST',
+			path: `/api/v1/contactBooks/${book.id}/contacts`,
+			params: { id: book.id },
+			body: { email: 'confirmed@example.com', emailConfirmed: true },
+			headers: bearer(apiKey),
+		});
+		const { status } = await invokeHandler(POST, event);
+
+		expect(status).toBe(200);
+		const contact = db
+			.select()
+			.from(contacts)
+			.where(and(eq(contacts.contactBookId, book.id), eq(contacts.email, 'confirmed@example.com')))
+			.get();
+		expect(contact?.subscribed).toBe(true);
 	});
 });
